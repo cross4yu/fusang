@@ -1,0 +1,2 @@
+# fusang
+ai ide
