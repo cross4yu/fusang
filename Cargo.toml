@@ -1,0 +1,17 @@
+[workspace]
+members = [
+    "editor-infra",
+    "editor-core-text", 
+    "editor-core-project",
+    "editor-lsp",
+    "editor-ai",
+    "editor-ui-gpui"
+]
+
+[package]
+name = "fusang"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+editor-ui-gpui = { path = "editor-ui-gpui" }

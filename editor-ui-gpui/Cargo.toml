@@ -1,0 +1,17 @@
+[package]
+name = "editor-ui-gpui"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+gpui = "0.1"
+editor-infra = { path = "../editor-infra" }
+editor-core-text = { path = "../editor-core-text" }
+editor-core-project = { path = "../editor-core-project" }
+editor-lsp = { path = "../editor-lsp" }
+editor-ai = { path = "../editor-ai" }
+tokio = { version = "1.0", features = ["full"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+thiserror = "1.0"
+anyhow = "1.0"
