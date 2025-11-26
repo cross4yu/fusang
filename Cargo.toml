@@ -1,10 +1,10 @@
 [workspace]
 members = [
     "editor-infra",
-    "editor-core-text", 
+    "editor-core-text",
     "editor-core-project",
     "editor-lsp",
     "editor-ai",
-    "editor-ui-gpui"
-]
+    "editor-ui-gpui",
+    "fusang-app"]
 resolver = "2"

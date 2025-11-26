@@ -1857,6 +1857,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "fusang-app"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "editor-infra",
+ "editor-ui-gpui",
+ "gpui",
+]
+
+[[package]]
 name = "futf"
 version = "0.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"

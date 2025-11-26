@@ -223,8 +223,7 @@ impl UndoRecord {
                 } else {
                     false
                 }
-            }
-            // _ => false,
+            } // _ => false,
         }
     }
 }

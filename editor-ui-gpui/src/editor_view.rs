@@ -236,8 +236,8 @@ impl EditorView {
     pub fn copy_selection(&mut self, cx: &mut Context<'_, Self>) {
         let buffer_manager = self.buffer_manager.clone();
 
-        cx.spawn(move |_this: WeakEntity<EditorView>, _cx: &mut AsyncApp| {
-            async move {
+        cx.spawn(
+            move |_this: WeakEntity<EditorView>, _cx: &mut AsyncApp| async move {
                 if let Some(buffer_handle) = buffer_manager.get_current_buffer().await {
                     let buffer = buffer_handle.lock().await;
                     let selections = buffer.get_selections();
@@ -248,8 +248,8 @@ impl EditorView {
                     }
                 }
                 anyhow::Ok(())
-            }
-        })
+            },
+        )
         .detach();
     }
 
@@ -380,22 +380,13 @@ impl Render for EditorView {
                         .flex()
                         .gap_2()
                         .child(div().p_1().rounded(px(4.0)).bg(rgb(0x3a3a3a)).child("Save"))
-                        .child(
-                            div()
-                                .p_1()
-                                .rounded(px(4.0))
-                                .bg(rgb(0x3a3a3a))
-                                .child("AI"),
-                        ),
+                        .child(div().p_1().rounded(px(4.0)).bg(rgb(0x3a3a3a)).child("AI")),
                 ),
         );
 
         let mut content_area = div().flex().flex_1();
 
-        let editor_area = div()
-            .flex_1()
-            .p_4()
-            .child("Editor content will be here");
+        let editor_area = div().flex_1().p_4().child("Editor content will be here");
 
         content_area = content_area.child(editor_area);
 

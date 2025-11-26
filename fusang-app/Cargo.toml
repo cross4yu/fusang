@@ -1,0 +1,10 @@
+[package]
+name = "fusang-app"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+gpui = { version = "0.2.2" }
+editor-ui-gpui = { path = "../editor-ui-gpui" }
+editor-infra = { path = "../editor-infra" }
+anyhow = "1"
