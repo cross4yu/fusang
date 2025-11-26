@@ -1,6 +1,6 @@
 use ropey::Rope;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Arc;
 use tokio::sync::RwLock;
 
 #[derive(Debug, Clone)]
@@ -41,7 +41,7 @@ impl TextModel {
 
     pub async fn insert(&self, char_idx: usize, text: &str) {
         let mut rope = self.rope.write().await;
-        
+
         if char_idx <= rope.len_chars() {
             rope.insert(char_idx, text);
             self.version.fetch_add(1, Ordering::SeqCst);
@@ -50,7 +50,7 @@ impl TextModel {
 
     pub async fn remove(&self, char_idx: usize, len: usize) {
         let mut rope = self.rope.write().await;
-        
+
         if char_idx < rope.len_chars() {
             let end_idx = (char_idx + len).min(rope.len_chars());
             rope.remove(char_idx..end_idx);
@@ -60,7 +60,7 @@ impl TextModel {
 
     pub async fn replace(&self, char_idx: usize, len: usize, text: &str) {
         let mut rope = self.rope.write().await;
-        
+
         if char_idx < rope.len_chars() {
             let end_idx = (char_idx + len).min(rope.len_chars());
             rope.remove(char_idx..end_idx);
@@ -101,6 +101,22 @@ impl TextModel {
 
     pub fn version(&self) -> usize {
         self.version.load(Ordering::SeqCst)
+    }
+
+    pub async fn set_text(&self, text: &str) {
+        let mut rope = self.rope.write().await;
+        *rope = Rope::from_str(text);
+        self.version.fetch_add(1, Ordering::SeqCst);
+    }
+
+    pub async fn get_text_range(&self, start: usize, end: usize) -> String {
+        let rope = self.rope.read().await;
+        let end = end.min(rope.len_chars());
+        if start >= end {
+            String::new()
+        } else {
+            rope.slice(start..end).to_string()
+        }
     }
 }
 

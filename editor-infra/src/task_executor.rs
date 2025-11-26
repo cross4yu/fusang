@@ -13,13 +13,10 @@ pub struct TaskExecutor {
 
 impl TaskExecutor {
     pub fn new() -> Self {
-        let runtime = Arc::new(
-            Runtime::new().expect("Failed to create Tokio runtime"),
-        );
-        
+        let runtime = Arc::new(Runtime::new().expect("Failed to create Tokio runtime"));
+
         let (sender, mut receiver) = mpsc::unbounded_channel::<Box<dyn FnOnce() + Send>>();
-        
-        let runtime_clone = runtime.clone();
+
         runtime.spawn(async move {
             while let Some(task) = receiver.recv().await {
                 task();

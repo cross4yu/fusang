@@ -1,5 +1,5 @@
-use std::path::{Path, PathBuf};
 use std::collections::HashMap;
+use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone)]
 pub enum FileTreeNode {
@@ -86,7 +86,7 @@ impl FileTree {
     fn build_tree(path: &Path, name: &str) -> Result<FileTreeNode, std::io::Error> {
         if path.is_dir() {
             let mut children = HashMap::new();
-            
+
             for entry in std::fs::read_dir(path)? {
                 let entry = entry?;
                 let entry_path = entry.path();
@@ -105,7 +105,7 @@ impl FileTree {
                     Self::build_tree(&entry_path, &entry_name)?
                 } else {
                     FileTreeNode::File {
-                        name: entry_name,
+                        name: entry_name.clone(),
                         path: entry_path,
                     }
                 };
@@ -139,7 +139,10 @@ impl FileTree {
         Self::find_node_in_tree(&self.root, path)
     }
 
-    fn find_node_in_tree(node: &FileTreeNode, target_path: &Path) -> Option<&FileTreeNode> {
+    fn find_node_in_tree<'a>(
+        node: &'a FileTreeNode,
+        target_path: &Path,
+    ) -> Option<&'a FileTreeNode> {
         if node.path() == target_path {
             return Some(node);
         }
@@ -159,7 +162,10 @@ impl FileTree {
         Self::find_node_in_tree_mut(&mut self.root, path)
     }
 
-    fn find_node_in_tree_mut(node: &mut FileTreeNode, target_path: &Path) -> Option<&mut FileTreeNode> {
+    fn find_node_in_tree_mut<'a>(
+        node: &'a mut FileTreeNode,
+        target_path: &Path,
+    ) -> Option<&'a mut FileTreeNode> {
         if node.path() == target_path {
             return Some(node);
         }
@@ -177,8 +183,7 @@ impl FileTree {
 
     pub fn refresh(&mut self) -> Result<(), std::io::Error> {
         let root_path = self.root.path().to_path_buf();
-        let root_name = self.root.name().to_string();
-        
+
         *self = Self::new(root_path)?;
         Ok(())
     }
@@ -208,10 +213,13 @@ impl FileTree {
         nodes
     }
 
-    fn collect_visible_nodes(node: &FileTreeNode, nodes: &mut Vec<&FileTreeNode>) {
+    fn collect_visible_nodes<'a>(node: &'a FileTreeNode, nodes: &mut Vec<&'a FileTreeNode>) {
         nodes.push(node);
 
-        if let FileTreeNode::Directory { children, expanded, .. } = node {
+        if let FileTreeNode::Directory {
+            children, expanded, ..
+        } = node
+        {
             if *expanded {
                 for child in children.values() {
                     Self::collect_visible_nodes(child, nodes);

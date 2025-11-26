@@ -1,9 +1,8 @@
 use editor_ai::models::{AIContext, AIMessage, AIRole};
 use editor_core_text::Buffer;
-use gpui::{AppContext, View, ViewContext};
+use gpui::{div, Context, IntoElement, ParentElement, Render, Window};
 use std::path::PathBuf;
 use std::sync::Arc;
-use tokio::sync::RwLock;
 
 #[derive(Debug, Clone)]
 pub struct AIPanel {
@@ -15,7 +14,7 @@ pub struct AIPanel {
 }
 
 impl AIPanel {
-    pub fn new(cx: &mut ViewContext<Self>, ai_engine: Arc<editor_ai::AIEngine>) -> Self {
+    pub fn new(_cx: &mut Context<'_, Self>, ai_engine: Arc<editor_ai::AIEngine>) -> Self {
         Self {
             messages: Vec::new(),
             current_model: "gpt-3.5-turbo".to_string(),
@@ -65,7 +64,7 @@ impl AIPanel {
 
         // 如果有缓冲区上下文，构建完整的消息
         let mut messages_to_send = self.messages.clone();
-        
+
         if let Some(context) = &self.buffer_context {
             // 构建包含上下文的系统消息
             let system_message = context.to_system_message();
@@ -73,7 +72,8 @@ impl AIPanel {
         }
 
         // 发送到 AI 引擎
-        let response = self.ai_engine
+        let response = self
+            .ai_engine
             .generate_chat_completion(messages_to_send, Some(&self.current_model))
             .await
             .map_err(|e| anyhow::anyhow!("AI engine error: {}", e))?;
@@ -174,10 +174,10 @@ impl AIPanel {
     }
 }
 
-// 为 AIPanel 实现 gpui 的视图特性
-impl gpui::View for AIPanel {
-    fn ui_name() -> &'static str {
-        "AIPanel"
+impl Render for AIPanel {
+    fn render(&mut self, _window: &mut Window, _cx: &mut Context<'_, Self>) -> impl IntoElement {
+        // Basic placeholder UI
+        div().child("AI Panel")
     }
 }
 
@@ -207,7 +207,8 @@ impl AIPanel {
 
     /// 请求代码改进建议
     pub async fn request_code_improvements(&mut self) -> anyhow::Result<()> {
-        let message = "请分析当前代码并提供改进建议，包括性能优化、代码风格、最佳实践等方面。".to_string();
+        let message =
+            "请分析当前代码并提供改进建议，包括性能优化、代码风格、最佳实践等方面。".to_string();
         self.send_message_with_context(message).await
     }
 

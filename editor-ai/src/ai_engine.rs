@@ -1,7 +1,6 @@
-use super::models::{AIRequest, AIResponse, AIContext, AIMessage, AIRole};
+use super::models::{AIContext, AIMessage, AIRequest, AIResponse, AIRole};
 use editor_infra::config::{AIConfig, AIProviderConfig, PredefinedModelConfig};
 use reqwest::Client;
-use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::Arc;
 use thiserror::Error;
@@ -46,16 +45,22 @@ impl AIEngine {
         context: AIContext,
         model_name: Option<&str>,
     ) -> Result<String, AIEngineError> {
-        let model_name = model_name.unwrap_or_else(|| {
-            let config = self.config.blocking_read();
-            &config.default_model
-        });
+        let owned_model_name;
+        let model_name = if let Some(name) = model_name {
+            name
+        } else {
+            owned_model_name = {
+                let cfg = self.config.read().await;
+                cfg.default_model.clone()
+            };
+            &owned_model_name
+        };
 
         let model_config = self.get_model_config(model_name).await?;
         let provider_config = self.get_provider_config(&model_config.provider).await?;
 
         let messages = self.build_messages(context, &model_config).await?;
-        
+
         let request = AIRequest {
             model: model_config.model_name.clone(),
             messages,
@@ -65,11 +70,13 @@ impl AIEngine {
         };
 
         let response = self.send_request(&provider_config, &request).await?;
-        
+
         if let Some(choice) = response.choices.first() {
             Ok(choice.message.content.clone())
         } else {
-            Err(AIEngineError::ConfigError("No response from AI".to_string()))
+            Err(AIEngineError::ConfigError(
+                "No response from AI".to_string(),
+            ))
         }
     }
 
@@ -78,10 +85,16 @@ impl AIEngine {
         messages: Vec<AIMessage>,
         model_name: Option<&str>,
     ) -> Result<String, AIEngineError> {
-        let model_name = model_name.unwrap_or_else(|| {
-            let config = self.config.blocking_read();
-            &config.default_model
-        });
+        let owned_model_name;
+        let model_name = if let Some(name) = model_name {
+            name
+        } else {
+            owned_model_name = {
+                let cfg = self.config.read().await;
+                cfg.default_model.clone()
+            };
+            &owned_model_name
+        };
 
         let model_config = self.get_model_config(model_name).await?;
         let provider_config = self.get_provider_config(&model_config.provider).await?;
@@ -95,11 +108,13 @@ impl AIEngine {
         };
 
         let response = self.send_request(&provider_config, &request).await?;
-        
+
         if let Some(choice) = response.choices.first() {
             Ok(choice.message.content.clone())
         } else {
-            Err(AIEngineError::ConfigError("No response from AI".to_string()))
+            Err(AIEngineError::ConfigError(
+                "No response from AI".to_string(),
+            ))
         }
     }
 
@@ -138,13 +153,19 @@ impl AIEngine {
                 message.push_str(&format!("Root: {}\n", root_path.display()));
             }
             if !project_context.dependencies.is_empty() {
-                message.push_str(&format!("Dependencies: {}\n", project_context.dependencies.join(", ")));
+                message.push_str(&format!(
+                    "Dependencies: {}\n",
+                    project_context.dependencies.join(", ")
+                ));
             }
             message.push_str("\n");
         }
 
         // 添加文件信息
-        message.push_str(&format!("## Current File\nLanguage: {}\n", context.file_info.language));
+        message.push_str(&format!(
+            "## Current File\nLanguage: {}\n",
+            context.file_info.language
+        ));
         if let Some(name) = &context.file_info.name {
             message.push_str(&format!("Name: {}\n", name));
         }
@@ -155,22 +176,32 @@ impl AIEngine {
 
         // 添加文件内容
         message.push_str("## File Content\n");
-        message.push_str(&format!("```{}\n{}\n```\n\n", 
-            context.file_info.language, context.file_content));
+        message.push_str(&format!(
+            "```{}\n{}\n```\n\n",
+            context.file_info.language, context.file_content
+        ));
 
         // 添加选区内容（如果有）
         if let Some(selection) = &context.selection {
             message.push_str("## Selected Code\n");
-            message.push_str(&format!("Position: L{}-C{} to L{}-C{}\n", 
-                selection.start_line, selection.start_column,
-                selection.end_line, selection.end_column));
-            message.push_str(&format!("```{}\n{}\n```\n\n", 
-                context.file_info.language, selection.text));
+            message.push_str(&format!(
+                "Position: L{}-C{} to L{}-C{}\n",
+                selection.start_line,
+                selection.start_column,
+                selection.end_line,
+                selection.end_column
+            ));
+            message.push_str(&format!(
+                "```{}\n{}\n```\n\n",
+                context.file_info.language, selection.text
+            ));
         }
 
         // 添加光标位置信息
-        message.push_str(&format!("## Cursor Position\nLine: {}, Column: {}\n\n", 
-            context.cursor.line, context.cursor.column));
+        message.push_str(&format!(
+            "## Cursor Position\nLine: {}, Column: {}\n\n",
+            context.cursor.line, context.cursor.column
+        ));
 
         message.push_str("Please provide helpful code suggestions, explanations, or improvements based on the above context.");
 
@@ -213,13 +244,14 @@ impl AIEngine {
         }
 
         let response = http_request.send().await?;
-        
+
         if !response.status().is_success() {
             let status = response.status();
             let error_text = response.text().await.unwrap_or_default();
-            return Err(AIEngineError::ConfigError(
-                format!("HTTP {}: {}", status, error_text)
-            ));
+            return Err(AIEngineError::ConfigError(format!(
+                "HTTP {}: {}",
+                status, error_text
+            )));
         }
 
         let ai_response: AIResponse = response.json().await?;
@@ -231,7 +263,7 @@ impl AIEngine {
         model_name: &str,
     ) -> Result<PredefinedModelConfig, AIEngineError> {
         let config = self.config.read().await;
-        
+
         if let Some(model_config) = config.predefined_models.get(model_name) {
             Ok(model_config.clone())
         } else {
@@ -244,12 +276,13 @@ impl AIEngine {
         provider_name: &str,
     ) -> Result<AIProviderConfig, AIEngineError> {
         let config = self.config.read().await;
-        
+
         if let Some(provider_config) = config.providers.get(provider_name) {
             if !provider_config.enabled {
-                return Err(AIEngineError::ConfigError(
-                    format!("Provider '{}' is disabled", provider_name)
-                ));
+                return Err(AIEngineError::ConfigError(format!(
+                    "Provider '{}' is disabled",
+                    provider_name
+                )));
             }
             Ok(provider_config.clone())
         } else {
@@ -272,7 +305,7 @@ impl AIEngine {
         provider_name: &str,
     ) -> Result<bool, AIEngineError> {
         let provider_config = self.get_provider_config(provider_name).await?;
-        
+
         // 简单的连接测试：发送一个空的请求或模型列表请求
         let url = match provider_config.provider_type {
             editor_infra::config::AIProviderType::Ollama => {
@@ -286,26 +319,5 @@ impl AIEngine {
 
         let response = self.http_client.get(&url).send().await?;
         Ok(response.status().is_success())
-    }
-}
-
-// 为 RwLock 添加便捷的阻塞读取方法
-trait BlockingRead {
-    type Guard;
-    fn blocking_read(&self) -> Self::Guard;
-}
-
-impl<T> BlockingRead for RwLock<T>
-where
-    T: Send + Sync,
-{
-    type Guard = tokio::sync::RwLockReadGuard<'static, T>;
-    
-    fn blocking_read(&self) -> Self::Guard {
-        tokio::task::block_in_place(|| {
-            tokio::runtime::Handle::current().block_on(async {
-                self.read().await
-            })
-        })
     }
 }

@@ -1,10 +1,10 @@
-use super::protocol::{LspMessage, Diagnostic, CompletionItem, Hover, Position, LspMethod};
+use super::protocol::{CompletionItem, Hover, LspMessage, LspMethod, Position};
 use serde_json::Value;
 use std::collections::HashMap;
-use std::process::{Child, ChildStdin, ChildStdout};
+use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
 use std::sync::Arc;
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
-use tokio::process::{Command, ChildStdin as AsyncChildStdin, ChildStdout as AsyncChildStdout};
+use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
+use tokio::process::{ChildStdin as AsyncChildStdin, ChildStdout as AsyncChildStdout};
 use tokio::sync::Mutex;
 
 #[derive(Debug)]
@@ -27,21 +27,25 @@ impl LspClient {
         }
     }
 
-    pub async fn start_server(&mut self, command: &str, args: &[String]) -> Result<(), std::io::Error> {
+    pub async fn start_server(
+        &mut self,
+        command: &str,
+        args: &[String],
+    ) -> Result<(), std::io::Error> {
         let mut command = Command::new(command);
         command.args(args);
-        command.stdin(std::process::Stdio::piped());
-        command.stdout(std::process::Stdio::piped());
-        command.stderr(std::process::Stdio::piped());
+        command.stdin(Stdio::piped());
+        command.stdout(Stdio::piped());
+        command.stderr(Stdio::piped());
 
         let mut child = command.spawn()?;
-        
+
         let stdin = child.stdin.take().expect("Failed to open stdin");
         let stdout = child.stdout.take().expect("Failed to open stdout");
-        
+
         let async_stdin = AsyncChildStdin::from_std(stdin)?;
         let async_stdout = AsyncChildStdout::from_std(stdout)?;
-        
+
         self.stdin = Some(async_stdin);
         self.stdout = Some(BufReader::new(async_stdout));
         self.process = Some(child);
@@ -74,11 +78,17 @@ impl LspClient {
             "trace": "off"
         });
 
-        let response = self.send_request(LspMethod::Initialize, initialize_params).await?;
+        let response = self
+            .send_request(LspMethod::Initialize, initialize_params)
+            .await?;
         Ok(response)
     }
 
-    pub async fn send_request(&mut self, method: LspMethod, params: Value) -> Result<Value, std::io::Error> {
+    pub async fn send_request(
+        &mut self,
+        method: LspMethod,
+        params: Value,
+    ) -> Result<Value, std::io::Error> {
         let request_id = self.next_request_id;
         self.next_request_id += 1;
 
@@ -114,7 +124,11 @@ impl LspClient {
         }
     }
 
-    pub async fn send_notification(&mut self, method: LspMethod, params: Value) -> Result<(), std::io::Error> {
+    pub async fn send_notification(
+        &mut self,
+        method: LspMethod,
+        params: Value,
+    ) -> Result<(), std::io::Error> {
         let message = LspMessage::new_notification(method, params);
         self.send_message(&message).await
     }
@@ -152,13 +166,18 @@ impl LspClient {
                             {
                                 // Read the header separator
                                 let mut separator = String::new();
-                                if reader.read_line(&mut separator).await.is_ok() && separator == "\r\n" {
+                                if reader.read_line(&mut separator).await.is_ok()
+                                    && separator == "\r\n"
+                                {
                                     // Read the JSON content
                                     let mut content = vec![0u8; content_length];
                                     if reader.read_exact(&mut content).await.is_ok() {
                                         if let Ok(json_str) = String::from_utf8(content) {
-                                            if let Ok(message) = serde_json::from_str::<LspMessage>(&json_str) {
-                                                Self::handle_message(&message, &pending_requests).await;
+                                            if let Ok(message) =
+                                                serde_json::from_str::<LspMessage>(&json_str)
+                                            {
+                                                Self::handle_message(&message, &pending_requests)
+                                                    .await;
                                             }
                                         }
                                     }
@@ -172,7 +191,10 @@ impl LspClient {
         });
     }
 
-    async fn handle_message(message: &LspMessage, pending_requests: &Arc<Mutex<HashMap<u64, tokio::sync::oneshot::Sender<LspMessage>>>>) {
+    async fn handle_message(
+        message: &LspMessage,
+        pending_requests: &Arc<Mutex<HashMap<u64, tokio::sync::oneshot::Sender<LspMessage>>>>,
+    ) {
         if let Some(id) = message.id {
             let mut pending = pending_requests.lock().await;
             if let Some(sender) = pending.remove(&id) {
@@ -182,14 +204,20 @@ impl LspClient {
         // Handle notifications (like diagnostics) here
     }
 
-    pub async fn request_completion(&mut self, uri: &str, position: Position) -> Result<Vec<CompletionItem>, std::io::Error> {
+    pub async fn request_completion(
+        &mut self,
+        uri: &str,
+        position: Position,
+    ) -> Result<Vec<CompletionItem>, std::io::Error> {
         let params = serde_json::json!({
             "textDocument": { "uri": uri },
             "position": position
         });
 
-        let result = self.send_request(LspMethod::TextDocumentCompletion, params).await?;
-        
+        let result = self
+            .send_request(LspMethod::TextDocumentCompletion, params)
+            .await?;
+
         if let Some(items) = result.get("items").and_then(|i| i.as_array()) {
             let completions: Vec<CompletionItem> = items
                 .iter()
@@ -201,17 +229,29 @@ impl LspClient {
         }
     }
 
-    pub async fn request_hover(&mut self, uri: &str, position: Position) -> Result<Option<Hover>, std::io::Error> {
+    pub async fn request_hover(
+        &mut self,
+        uri: &str,
+        position: Position,
+    ) -> Result<Option<Hover>, std::io::Error> {
         let params = serde_json::json!({
             "textDocument": { "uri": uri },
             "position": position
         });
 
-        let result = self.send_request(LspMethod::TextDocumentHover, params).await?;
-        serde_json::from_value(result).map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))
+        let result = self
+            .send_request(LspMethod::TextDocumentHover, params)
+            .await?;
+        serde_json::from_value(result)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))
     }
 
-    pub async fn notify_did_open(&mut self, uri: &str, text: &str, language_id: &str) -> Result<(), std::io::Error> {
+    pub async fn notify_did_open(
+        &mut self,
+        uri: &str,
+        text: &str,
+        language_id: &str,
+    ) -> Result<(), std::io::Error> {
         let params = serde_json::json!({
             "textDocument": {
                 "uri": uri,
@@ -221,10 +261,16 @@ impl LspClient {
             }
         });
 
-        self.send_notification(LspMethod::TextDocumentDidOpen, params).await
+        self.send_notification(LspMethod::TextDocumentDidOpen, params)
+            .await
     }
 
-    pub async fn notify_did_change(&mut self, uri: &str, text: &str, version: u64) -> Result<(), std::io::Error> {
+    pub async fn notify_did_change(
+        &mut self,
+        uri: &str,
+        text: &str,
+        version: u64,
+    ) -> Result<(), std::io::Error> {
         let params = serde_json::json!({
             "textDocument": {
                 "uri": uri,
@@ -235,17 +281,20 @@ impl LspClient {
             }]
         });
 
-        self.send_notification(LspMethod::TextDocumentDidChange, params).await
+        self.send_notification(LspMethod::TextDocumentDidChange, params)
+            .await
     }
 
     pub async fn shutdown(&mut self) -> Result<(), std::io::Error> {
-        self.send_request(LspMethod::Shutdown, serde_json::Value::Null).await?;
-        self.send_notification(LspMethod::Exit, serde_json::Value::Null).await?;
-        
+        self.send_request(LspMethod::Shutdown, serde_json::Value::Null)
+            .await?;
+        self.send_notification(LspMethod::Exit, serde_json::Value::Null)
+            .await?;
+
         if let Some(mut process) = self.process.take() {
             process.kill()?;
         }
-        
+
         Ok(())
     }
 }

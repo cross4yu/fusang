@@ -38,7 +38,9 @@ impl Workspace {
     }
 
     pub fn contains_file(&self, file_path: &Path) -> bool {
-        self.root_paths.iter().any(|root| file_path.starts_with(root))
+        self.root_paths
+            .iter()
+            .any(|root| file_path.starts_with(root))
     }
 
     pub fn relative_path(&self, file_path: &Path) -> Option<PathBuf> {
@@ -52,20 +54,20 @@ impl Workspace {
 
     pub fn get_files(&self) -> Result<Vec<PathBuf>, WorkspaceError> {
         let mut files = Vec::new();
-        
+
         for root in &self.root_paths {
             let entries = walkdir::WalkDir::new(root)
                 .follow_links(true)
                 .into_iter()
                 .filter_map(|e| e.ok());
-            
+
             for entry in entries {
                 if entry.file_type().is_file() {
                     files.push(entry.path().to_path_buf());
                 }
             }
         }
-        
+
         Ok(files)
     }
 
@@ -80,7 +82,7 @@ impl Workspace {
                     .unwrap_or(false)
             })
             .collect();
-        
+
         Ok(filtered)
     }
 

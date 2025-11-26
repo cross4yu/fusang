@@ -1,5 +1,5 @@
-use serde::{Deserialize, Serialize};
 use super::cursor::Cursor;
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Selection {
@@ -31,8 +31,9 @@ impl Selection {
     }
 
     pub fn start(&self) -> Cursor {
-        if self.anchor.line < self.active.line 
-            || (self.anchor.line == self.active.line && self.anchor.column <= self.active.column) {
+        if self.anchor.line < self.active.line
+            || (self.anchor.line == self.active.line && self.anchor.column <= self.active.column)
+        {
             self.anchor
         } else {
             self.active
@@ -40,8 +41,9 @@ impl Selection {
     }
 
     pub fn end(&self) -> Cursor {
-        if self.anchor.line > self.active.line 
-            || (self.anchor.line == self.active.line && self.anchor.column > self.active.column) {
+        if self.anchor.line > self.active.line
+            || (self.anchor.line == self.active.line && self.anchor.column > self.active.column)
+        {
             self.anchor
         } else {
             self.active
@@ -51,7 +53,7 @@ impl Selection {
     pub fn contains(&self, cursor: Cursor) -> bool {
         let start = self.start();
         let end = self.end();
-        
+
         (cursor.line > start.line || (cursor.line == start.line && cursor.column >= start.column))
             && (cursor.line < end.line || (cursor.line == end.line && cursor.column <= end.column))
     }

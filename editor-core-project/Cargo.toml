@@ -1,12 +1,13 @@
-"[package]
-name = \"editor-core-project\"
-version = \"0.1.0\"
-edition = \"2021\"
+[package]
+name = "editor-core-project"
+version = "0.1.0"
+edition = "2021"
 
 [dependencies]
-editor-infra = { path = \"../editor-infra\" }
-editor-core-text = { path = \"../editor-core-text\" }
-tokio = { version = \"1.0\", features = [\"full\"] }
-serde = { version = \"1.0\", features = [\"derive\"] }
-thiserror = \"1.0\"
-walkdir = \"2.3\""
+editor-infra = { path = "../editor-infra" }
+editor-core-text = { path = "../editor-core-text" }
+tokio = { version = "1.0", features = ["full"] }
+serde = { version = "1.0", features = ["derive"] }
+thiserror = "1.0"
+walkdir = "2.3"
+uuid = { version = "1.7", features = ["v4"] }

@@ -2,13 +2,12 @@ use super::client::LspClient;
 use super::protocol::{Diagnostic, Position};
 use editor_infra::config::LSPServerConfig;
 use std::collections::HashMap;
-use std::path::PathBuf;
 use std::sync::Arc;
-use tokio::sync::RwLock;
+use tokio::sync::{Mutex, RwLock};
 
 #[derive(Debug)]
 pub struct LspServerManager {
-    servers: Arc<RwLock<HashMap<String, LspClient>>>,
+    servers: Arc<RwLock<HashMap<String, Arc<Mutex<LspClient>>>>>,
     diagnostics: Arc<RwLock<HashMap<String, Vec<Diagnostic>>>>,
 }
 
@@ -25,9 +24,14 @@ impl LspServerManager {
         config: &LSPServerConfig,
         workspace_root: &str,
     ) -> Result<(), std::io::Error> {
-        let mut client = LspClient::new();
-        client.start_server(&config.command, &config.args).await?;
-        client.initialize(workspace_root).await?;
+        let client = Arc::new(Mutex::new(LspClient::new()));
+        {
+            let mut client_guard = client.lock().await;
+            client_guard
+                .start_server(&config.command, &config.args)
+                .await?;
+            client_guard.initialize(workspace_root).await?;
+        }
 
         let mut servers = self.servers.write().await;
         servers.insert(config.language.clone(), client);
@@ -35,7 +39,7 @@ impl LspServerManager {
         Ok(())
     }
 
-    pub async fn get_server(&self, language: &str) -> Option<LspClient> {
+    pub async fn get_server(&self, language: &str) -> Option<Arc<Mutex<LspClient>>> {
         let servers = self.servers.read().await;
         servers.get(language).cloned()
     }
@@ -46,7 +50,8 @@ impl LspServerManager {
         uri: &str,
         position: Position,
     ) -> Result<Vec<super::protocol::CompletionItem>, std::io::Error> {
-        if let Some(mut client) = self.get_server(language).await {
+        if let Some(client) = self.get_server(language).await {
+            let mut client = client.lock().await;
             client.request_completion(uri, position).await
         } else {
             Ok(Vec::new())
@@ -59,7 +64,8 @@ impl LspServerManager {
         uri: &str,
         position: Position,
     ) -> Result<Option<super::protocol::Hover>, std::io::Error> {
-        if let Some(mut client) = self.get_server(language).await {
+        if let Some(client) = self.get_server(language).await {
+            let mut client = client.lock().await;
             client.request_hover(uri, position).await
         } else {
             Ok(None)
@@ -72,7 +78,8 @@ impl LspServerManager {
         uri: &str,
         text: &str,
     ) -> Result<(), std::io::Error> {
-        if let Some(mut client) = self.get_server(language).await {
+        if let Some(client) = self.get_server(language).await {
+            let mut client = client.lock().await;
             client.notify_did_open(uri, text, language).await
         } else {
             Ok(())
@@ -86,7 +93,8 @@ impl LspServerManager {
         text: &str,
         version: u64,
     ) -> Result<(), std::io::Error> {
-        if let Some(mut client) = self.get_server(language).await {
+        if let Some(client) = self.get_server(language).await {
+            let mut client = client.lock().await;
             client.notify_did_change(uri, text, version).await
         } else {
             Ok(())
@@ -105,7 +113,8 @@ impl LspServerManager {
 
     pub async fn shutdown_all(&self) -> Result<(), std::io::Error> {
         let mut servers = self.servers.write().await;
-        for (_, mut client) in servers.drain() {
+        for (_, client) in servers.drain() {
+            let mut client = client.lock().await;
             client.shutdown().await?;
         }
         Ok(())

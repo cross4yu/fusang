@@ -1,4 +1,4 @@
-use tracing::{Level, Subscriber};
+use tracing::Level;
 use tracing_subscriber::{fmt, layer::SubscriberExt, util::SubscriberInitExt, EnvFilter, Registry};
 
 pub fn init_logging() {
@@ -10,7 +10,7 @@ pub fn init_logging() {
 
     let filter_layer = EnvFilter::try_from_default_env()
         .or_else(|_| EnvFilter::try_new("info"))
-        .unwrap();
+        .expect("failed to initialize logging filter");
 
     Registry::default()
         .with(filter_layer)

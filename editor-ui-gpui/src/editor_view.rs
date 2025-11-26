@@ -1,8 +1,11 @@
+use crate::AIPanel;
 use editor_core_project::BufferManager;
-use editor_core_text::{Buffer, Cursor, CursorMovement, Selection};
+use editor_core_text::CursorMovement;
 use editor_infra::config::Config;
-use editor_ui_gpui::AIPanel;
-use gpui::*;
+use gpui::{
+    div, px, rgb, AppContext, AsyncApp, Context, Entity, IntoElement, KeystrokeEvent,
+    ParentElement, Render, Styled, WeakEntity, Window,
+};
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -11,15 +14,15 @@ pub struct EditorView {
     config: Config,
     current_file_path: Option<PathBuf>,
     show_ai_panel: bool,
-    ai_panel: Option<View<AIPanel>>,
+    ai_panel: Option<Entity<AIPanel>>,
     ai_engine: Arc<editor_ai::AIEngine>,
 }
 
 impl EditorView {
-    pub fn new(cx: &mut ViewContext<Self>) -> Self {
+    pub fn new(_cx: &mut Context<'_, Self>) -> Self {
         let config = Config::default();
         let ai_engine = Arc::new(editor_ai::AIEngine::new(config.ai.clone()));
-        
+
         Self {
             buffer_manager: BufferManager::new(),
             config,
@@ -31,93 +34,97 @@ impl EditorView {
     }
 
     /// 打开文件
-    pub fn open_file(&mut self, file_path: &std::path::Path, cx: &mut ViewContext<Self>) {
+    pub fn open_file(&mut self, file_path: &std::path::Path, cx: &mut Context<'_, Self>) {
         let buffer_manager = self.buffer_manager.clone();
-        let file_path = file_path.to_path_buf();
-        
-        cx.spawn(|mut cx| async move {
-            if let Err(e) = buffer_manager.open_file(&file_path).await {
-                log::error!("Failed to open file {}: {}", file_path.display(), e);
-            } else {
-                cx.update(|cx| {
-                    cx.notify();
-                })?;
+        let path = file_path.to_path_buf();
+
+        cx.spawn(move |this: WeakEntity<EditorView>, cx: &mut AsyncApp| {
+            // ❗ clone 放在 async 之前
+            let mut app = cx.clone();
+            let path_for_io = path.clone();
+
+            async move {
+                match buffer_manager.open_file(&path_for_io).await {
+                    Ok(_) => {
+                        let path_clone = path_for_io.clone();
+                        let _ = this.update(&mut app, |view, cx| {
+                            view.current_file_path = Some(path_clone);
+                            cx.notify();
+                        });
+                    }
+                    Err(e) => log::error!("Failed to open file {}: {}", path_for_io.display(), e),
+                }
+
+                anyhow::Ok(())
             }
-            anyhow::Ok(())
         })
         .detach();
-        
-        self.current_file_path = Some(file_path);
-    }
-
-    /// 获取当前缓冲区
-    pub async fn get_current_buffer(&self) -> Option<Buffer> {
-        self.buffer_manager.get_current_buffer().await.ok()
     }
 
     /// 插入文本
-    pub fn insert_text(&mut self, text: &str, cx: &mut ViewContext<Self>) {
+    pub fn insert_text(&mut self, text: &str, cx: &mut Context<'_, Self>) {
         let buffer_manager = self.buffer_manager.clone();
         let text = text.to_string();
-        
-        cx.spawn(|mut cx| async move {
-            if let Some(mut buffer) = buffer_manager.get_current_buffer().await.ok() {
-                buffer.insert_text_at_cursor(&text).await;
-                cx.update(|cx| {
-                    cx.notify();
-                })?;
+
+        cx.spawn(move |this: WeakEntity<EditorView>, cx: &mut AsyncApp| {
+            let mut app = cx.clone();
+
+            async move {
+                if let Some(buffer_handle) = buffer_manager.get_current_buffer().await {
+                    let mut buffer = buffer_handle.lock().await;
+                    buffer.insert_text_at_cursor(&text).await;
+                    let _ = this.update(&mut app, |_, cx| cx.notify());
+                }
+
+                anyhow::Ok(())
             }
-            anyhow::Ok(())
         })
         .detach();
     }
 
     /// 删除文本
-    pub fn delete_text(&mut self, cx: &mut ViewContext<Self>) {
+    pub fn delete_text(&mut self, cx: &mut Context<'_, Self>) {
         let buffer_manager = self.buffer_manager.clone();
-        
-        cx.spawn(|mut cx| async move {
-            if let Some(mut buffer) = buffer_manager.get_current_buffer().await.ok() {
-                buffer.delete_backward().await;
-                cx.update(|cx| {
-                    cx.notify();
-                })?;
+
+        cx.spawn(move |this: WeakEntity<EditorView>, cx: &mut AsyncApp| {
+            let mut app = cx.clone();
+
+            async move {
+                if let Some(buffer_handle) = buffer_manager.get_current_buffer().await {
+                    let mut buffer = buffer_handle.lock().await;
+                    buffer.delete_backward().await;
+                    let _ = this.update(&mut app, |_, cx| cx.notify());
+                }
+
+                anyhow::Ok(())
             }
-            anyhow::Ok(())
         })
         .detach();
     }
 
-    /// 移动光标
-    pub fn move_cursor(&mut self, movement: CursorMovement, cx: &mut ViewContext<Self>) {
-        let buffer_manager = self.buffer_manager.clone();
-        
-        cx.spawn(|mut cx| async move {
-            if let Some(mut buffer) = buffer_manager.get_current_buffer().await.ok() {
-                // 这里需要根据实际的 Buffer API 来实现光标移动
-                // 暂时使用通知更新
-                cx.update(|cx| {
-                    cx.notify();
-                })?;
-            }
-            anyhow::Ok(())
-        })
-        .detach();
+    /// 移动光标（占位）
+    pub fn move_cursor(&mut self, _movement: CursorMovement, cx: &mut Context<'_, Self>) {
+        log::info!("Move cursor placeholder");
+        cx.notify();
     }
 
     /// 保存当前文件
-    pub fn save_current_file(&mut self, cx: &mut ViewContext<Self>) {
+    pub fn save_current_file(&mut self, cx: &mut Context<'_, Self>) {
         let buffer_manager = self.buffer_manager.clone();
-        
-        cx.spawn(|mut cx| async move {
-            if let Err(e) = buffer_manager.save_current_file().await {
-                log::error!("Failed to save file: {}", e);
-            } else {
-                cx.update(|cx| {
-                    cx.notify();
-                })?;
+
+        cx.spawn(move |this: WeakEntity<EditorView>, cx: &mut AsyncApp| {
+            let mut app = cx.clone();
+
+            async move {
+                match buffer_manager.save_current_file().await {
+                    Ok(_) => {
+                        let _ = this.update(&mut app, |_, cx| cx.notify());
+                    }
+                    Err(e) => log::error!("Failed to save file: {}", e),
+                }
+
+                anyhow::Ok(())
             }
-            anyhow::Ok(())
         })
         .detach();
     }
@@ -143,253 +150,214 @@ impl EditorView {
     }
 
     /// 切换 AI 面板显示
-    pub fn toggle_ai_panel(&mut self, cx: &mut ViewContext<Self>) {
+    pub fn toggle_ai_panel(&mut self, cx: &mut Context<'_, Self>) {
         self.show_ai_panel = !self.show_ai_panel;
-        
+
         if self.show_ai_panel && self.ai_panel.is_none() {
             let ai_engine = self.ai_engine.clone();
-            self.ai_panel = Some(cx.new_view(|cx| AIPanel::new(cx, ai_engine)));
+            self.ai_panel = Some(cx.new(|cx| AIPanel::new(cx, ai_engine)));
         }
-        
+
         cx.notify();
     }
 
     /// 设置 AI 面板上下文
-    pub fn set_ai_context(&mut self, cx: &mut ViewContext<Self>) {
+    pub fn set_ai_context(&mut self, cx: &mut Context<'_, Self>) {
         if let Some(ai_panel) = &self.ai_panel {
             let buffer_manager = self.buffer_manager.clone();
             let file_path = self.current_file_path.clone();
             let language = self.current_file_language();
             let ai_panel = ai_panel.clone();
-            
-            cx.spawn(|mut cx| async move {
-                if let Some(buffer) = buffer_manager.get_current_buffer().await.ok() {
-                    if let Ok(context) = AIPanel::build_context_from_buffer(
-                        &buffer, 
-                        file_path, 
-                        &language
-                    ).await {
-                        cx.update(|cx| {
-                            if let Some(mut panel) = ai_panel.update(cx, |panel, _| {
+
+            cx.spawn(move |_this: WeakEntity<EditorView>, cx: &mut AsyncApp| {
+                let mut app = cx.clone();
+
+                async move {
+                    if let Some(buffer_handle) = buffer_manager.get_current_buffer().await {
+                        let buffer = buffer_handle.lock().await;
+                        if let Ok(context) =
+                            AIPanel::build_context_from_buffer(&buffer, file_path, &language).await
+                        {
+                            let _ = ai_panel.update(&mut app, move |panel, _| {
                                 panel.set_buffer_context(context);
-                                Some(panel.clone())
-                            }) {
-                                // 上下文设置成功
-                            }
-                        })?;
+                            });
+                        }
                     }
+
+                    anyhow::Ok(())
                 }
-                anyhow::Ok(())
             })
             .detach();
         }
     }
 
     /// 向 AI 发送消息
-    pub fn send_ai_message(&mut self, message: String, cx: &mut ViewContext<Self>) {
+    pub fn send_ai_message(&mut self, message: String, cx: &mut Context<'_, Self>) {
         if let Some(ai_panel) = &self.ai_panel {
             let ai_panel = ai_panel.clone();
-            
-            cx.spawn(|mut cx| async move {
-                if let Some(mut panel) = ai_panel.update(&mut cx, |panel, cx| {
-                    Some((panel.clone(), cx.clone()))
-                }) {
-                    let (panel, cx_ref) = panel;
-                    panel.update(&cx_ref, |panel, _| {
-                        let panel_clone = panel.clone();
-                        cx_ref.spawn(|_| async move {
-                            if let Err(e) = panel_clone.send_message(message).await {
-                                log::error!("Failed to send AI message: {}", e);
-                            }
-                        })
-                        .detach();
-                    });
+
+            cx.spawn(move |_this: WeakEntity<EditorView>, cx: &mut AsyncApp| {
+                let mut app = cx.clone();
+
+                async move {
+                    if let Ok(mut panel_state) = ai_panel.update(&mut app, |panel, _| panel.clone())
+                    {
+                        // 如果这里将来报 E0282，就按 AIPanel 定义补 turbofish：
+                        // panel_state.send_message::<AIPanelMessage>(message).await
+                        if let Err(e) = panel_state.send_message(message).await {
+                            log::error!("Failed to send AI message: {}", e);
+                        }
+
+                        let _ = ai_panel.update(&mut app, |panel, _| {
+                            *panel = panel_state;
+                        });
+                    }
+
+                    anyhow::Ok(())
                 }
-                anyhow::Ok(())
             })
             .detach();
         }
     }
 
     /// 请求代码解释
-    pub fn request_code_explanation(&mut self, cx: &mut ViewContext<Self>) {
+    pub fn request_code_explanation(&mut self, cx: &mut Context<'_, Self>) {
         self.set_ai_context(cx);
         self.send_ai_message("请解释这段代码的功能和工作原理。".to_string(), cx);
     }
 
     /// 请求代码改进
-    pub fn request_code_improvements(&mut self, cx: &mut ViewContext<Self>) {
+    pub fn request_code_improvements(&mut self, cx: &mut Context<'_, Self>) {
         self.set_ai_context(cx);
         self.send_ai_message("请分析这段代码并提供改进建议。".to_string(), cx);
     }
 
     /// 复制选中文本
-    pub fn copy_selection(&mut self, cx: &mut ViewContext<Self>) {
+    pub fn copy_selection(&mut self, cx: &mut Context<'_, Self>) {
         let buffer_manager = self.buffer_manager.clone();
-        
-        cx.spawn(|mut cx| async move {
-            if let Some(buffer) = buffer_manager.get_current_buffer().await.ok() {
-                let selections = buffer.get_selections();
-                if let Some(selection) = selections.first() {
-                    if !selection.is_collapsed() {
-                        // 这里需要实现选区文本复制逻辑
-                        // 暂时记录日志
-                        log::info!("Copy selection: {:?}", selection);
+
+        cx.spawn(move |_this: WeakEntity<EditorView>, _cx: &mut AsyncApp| {
+            async move {
+                if let Some(buffer_handle) = buffer_manager.get_current_buffer().await {
+                    let buffer = buffer_handle.lock().await;
+                    let selections = buffer.get_selections();
+                    if let Some(selection) = selections.first() {
+                        if !selection.is_collapsed() {
+                            log::info!("Copy selection: {:?}", selection);
+                        }
                     }
                 }
+                anyhow::Ok(())
             }
-            anyhow::Ok(())
         })
         .detach();
     }
 
     /// 粘贴文本
-    pub fn paste_text(&mut self, cx: &mut ViewContext<Self>) {
-        // 这里需要实现从剪贴板粘贴文本的逻辑
-        // 暂时使用空实现
-        log::info!("Paste text");
+    pub fn paste_text(&mut self, cx: &mut Context<'_, Self>) {
+        log::info!("Paste text placeholder");
         cx.notify();
     }
 
     /// 撤销操作
-    pub fn undo(&mut self, cx: &mut ViewContext<Self>) {
+    pub fn undo(&mut self, cx: &mut Context<'_, Self>) {
         let buffer_manager = self.buffer_manager.clone();
-        
-        cx.spawn(|mut cx| async move {
-            if let Some(mut buffer) = buffer_manager.get_current_buffer().await.ok() {
-                // 这里需要实现撤销逻辑
-                // 暂时使用通知
-                cx.update(|cx| {
-                    cx.notify();
-                })?;
+
+        cx.spawn(move |this: WeakEntity<EditorView>, cx: &mut AsyncApp| {
+            let mut app = cx.clone();
+
+            async move {
+                if let Some(buffer_handle) = buffer_manager.get_current_buffer().await {
+                    let mut buffer = buffer_handle.lock().await;
+                    if buffer.undo().await {
+                        let _ = this.update(&mut app, |_, cx| cx.notify());
+                    }
+                }
+
+                anyhow::Ok(())
             }
-            anyhow::Ok(())
         })
         .detach();
     }
 
     /// 重做操作
-    pub fn redo(&mut self, cx: &mut ViewContext<Self>) {
+    pub fn redo(&mut self, cx: &mut Context<'_, Self>) {
         let buffer_manager = self.buffer_manager.clone();
-        
-        cx.spawn(|mut cx| async move {
-            if let Some(mut buffer) = buffer_manager.get_current_buffer().await.ok() {
-                // 这里需要实现重做逻辑
-                // 暂时使用通知
-                cx.update(|cx| {
-                    cx.notify();
-                })?;
+
+        cx.spawn(move |this: WeakEntity<EditorView>, cx: &mut AsyncApp| {
+            let mut app = cx.clone();
+
+            async move {
+                if let Some(buffer_handle) = buffer_manager.get_current_buffer().await {
+                    let mut buffer = buffer_handle.lock().await;
+                    if buffer.redo().await {
+                        let _ = this.update(&mut app, |_, cx| cx.notify());
+                    }
+                }
+
+                anyhow::Ok(())
             }
-            anyhow::Ok(())
         })
         .detach();
     }
 
-    /// 查找文本
-    pub fn find_text(&mut self, query: &str, cx: &mut ViewContext<Self>) {
-        let buffer_manager = self.buffer_manager.clone();
-        let query = query.to_string();
-        
-        cx.spawn(|mut cx| async move {
-            if let Some(buffer) = buffer_manager.get_current_buffer().await.ok() {
-                // 这里需要实现文本查找逻辑
-                log::info!("Find text: {}", query);
-            }
-            anyhow::Ok(())
-        })
-        .detach();
+    /// 查找文本（占位）
+    pub fn find_text(&mut self, query: &str, cx: &mut Context<'_, Self>) {
+        log::info!("Find text: {}", query);
+        cx.notify();
     }
 
-    /// 替换文本
-    pub fn replace_text(&mut self, query: &str, replacement: &str, cx: &mut ViewContext<Self>) {
-        let buffer_manager = self.buffer_manager.clone();
-        let query = query.to_string();
-        let replacement = replacement.to_string();
-        
-        cx.spawn(|mut cx| async move {
-            if let Some(mut buffer) = buffer_manager.get_current_buffer().await.ok() {
-                // 这里需要实现文本替换逻辑
-                log::info!("Replace '{}' with '{}'", query, replacement);
-            }
-            anyhow::Ok(())
-        })
-        .detach();
+    /// 替换文本（占位）
+    pub fn replace_text(&mut self, query: &str, replacement: &str, cx: &mut Context<'_, Self>) {
+        log::info!("Replace '{}' with '{}'", query, replacement);
+        cx.notify();
     }
 
-    /// 格式化代码
-    pub fn format_code(&mut self, cx: &mut ViewContext<Self>) {
-        let buffer_manager = self.buffer_manager.clone();
-        
-        cx.spawn(|mut cx| async move {
-            if let Some(mut buffer) = buffer_manager.get_current_buffer().await.ok() {
-                // 这里需要实现代码格式化逻辑
-                // 可以使用 LSP 或内置格式化器
-                log::info!("Format code");
-                cx.update(|cx| {
-                    cx.notify();
-                })?;
-            }
-            anyhow::Ok(())
-        })
-        .detach();
+    /// 格式化代码（占位）
+    pub fn format_code(&mut self, cx: &mut Context<'_, Self>) {
+        log::info!("Format code placeholder");
+        cx.notify();
     }
 
-    /// 切换注释
-    pub fn toggle_comment(&mut self, cx: &mut ViewContext<Self>) {
-        let buffer_manager = self.buffer_manager.clone();
-        
-        cx.spawn(|mut cx| async move {
-            if let Some(mut buffer) = buffer_manager.get_current_buffer().await.ok() {
-                // 这里需要实现注释切换逻辑
-                log::info!("Toggle comment");
-                cx.update(|cx| {
-                    cx.notify();
-                })?;
-            }
-            anyhow::Ok(())
-        })
-        .detach();
+    /// 切换注释（占位）
+    pub fn toggle_comment(&mut self, cx: &mut Context<'_, Self>) {
+        log::info!("Toggle comment placeholder");
+        cx.notify();
     }
 
     /// 缩进代码
-    pub fn indent_code(&mut self, cx: &mut ViewContext<Self>) {
+    pub fn indent_code(&mut self, cx: &mut Context<'_, Self>) {
         let buffer_manager = self.buffer_manager.clone();
-        
-        cx.spawn(|mut cx| async move {
-            if let Some(mut buffer) = buffer_manager.get_current_buffer().await.ok() {
-                buffer.insert_tab(4).await; // 使用 4 空格缩进
-                cx.update(|cx| {
-                    cx.notify();
-                })?;
+
+        cx.spawn(move |this: WeakEntity<EditorView>, cx: &mut AsyncApp| {
+            let mut app = cx.clone();
+
+            async move {
+                if let Some(buffer_handle) = buffer_manager.get_current_buffer().await {
+                    let mut buffer = buffer_handle.lock().await;
+                    buffer.insert_tab(4).await; // TODO: use config.tab_size
+                    let _ = this.update(&mut app, |_, cx| cx.notify());
+                }
+
+                anyhow::Ok(())
             }
-            anyhow::Ok(())
         })
         .detach();
     }
 
-    /// 取消缩进代码
-    pub fn unindent_code(&mut self, cx: &mut ViewContext<Self>) {
-        let buffer_manager = self.buffer_manager.clone();
-        
-        cx.spawn(|mut cx| async move {
-            if let Some(mut buffer) = buffer_manager.get_current_buffer().await.ok() {
-                // 这里需要实现取消缩进逻辑
-                log::info!("Unindent code");
-                cx.update(|cx| {
-                    cx.notify();
-                })?;
-            }
-            anyhow::Ok(())
-        })
-        .detach();
+    /// 取消缩进代码（占位）
+    pub fn unindent_code(&mut self, cx: &mut Context<'_, Self>) {
+        log::info!("Unindent code placeholder");
+        cx.notify();
     }
 }
 
 impl Render for EditorView {
-    fn render(&mut self, cx: &mut ViewContext<Self>) -> impl IntoElement {
-        let file_name = self.current_file_name()
+    fn render(&mut self, _window: &mut Window, cx: &mut Context<'_, Self>) -> impl IntoElement {
+        let file_name = self
+            .current_file_name()
             .unwrap_or_else(|| "Untitled".to_string());
-        
+
         let mut layout = div()
             .flex()
             .flex_col()
@@ -397,9 +365,8 @@ impl Render for EditorView {
             .bg(rgb(0x1e1e1e))
             .text_color(rgb(0xcccccc))
             .font_family("Monaco, Menlo, 'Courier New', monospace")
-            .font_size(self.config.editor.font_size);
+            .text_size(px(self.config.editor.font_size));
 
-        // 标题栏
         layout = layout.child(
             div()
                 .flex()
@@ -407,46 +374,31 @@ impl Render for EditorView {
                 .p_2()
                 .border_b_1()
                 .border_color(rgb(0x333333))
-                .child(
-                    div()
-                        .flex_1()
-                        .child(file_name)
-                )
+                .child(div().flex_1().child(file_name))
                 .child(
                     div()
                         .flex()
                         .gap_2()
+                        .child(div().p_1().rounded(px(4.0)).bg(rgb(0x3a3a3a)).child("Save"))
                         .child(
-                            button()
-                                .on_click(cx.listener(|this, _, cx| this.save_current_file(cx)))
-                                .child("Save")
-                        )
-                        .child(
-                            button()
-                                .on_click(cx.listener(|this, _, cx| this.toggle_ai_panel(cx)))
-                                .child("AI")
-                        )
-                )
+                            div()
+                                .p_1()
+                                .rounded(px(4.0))
+                                .bg(rgb(0x3a3a3a))
+                                .child("AI"),
+                        ),
+                ),
         );
 
-        // 主内容区域
-        let mut content_area = div()
-            .flex()
-            .flex_1();
+        let mut content_area = div().flex().flex_1();
 
-        // 编辑器区域
         let editor_area = div()
             .flex_1()
             .p_4()
-            .child("Editor content will be here")
-            .on_click(cx.listener(|this, _, cx| {
-                // 处理编辑器点击事件
-                log::info!("Editor clicked");
-            }));
+            .child("Editor content will be here");
 
         content_area = content_area.child(editor_area);
 
-        // AI 面板
         if self.show_ai_panel {
             if let Some(ai_panel) = &self.ai_panel {
                 content_area = content_area.child(
@@ -454,7 +406,7 @@ impl Render for EditorView {
                         .w_96()
                         .border_l_1()
                         .border_color(rgb(0x333333))
-                        .child(ai_panel.clone())
+                        .child(ai_panel.clone()),
                 );
             }
         }
@@ -463,56 +415,31 @@ impl Render for EditorView {
     }
 }
 
-// 键盘事件处理
 impl EditorView {
-    pub fn handle_key_event(&mut self, event: &KeyEvent, cx: &mut ViewContext<Self>) {
-        match event.key.as_str() {
-            "s" if event.modifiers.command => {
-                self.save_current_file(cx);
-            }
-            "z" if event.modifiers.command => {
-                self.undo(cx);
-            }
-            "y" if event.modifiers.command => {
-                self.redo(cx);
-            }
-            "f" if event.modifiers.command => {
-                // 打开查找对话框
-                log::info!("Open find dialog");
-            }
-            "c" if event.modifiers.command => {
-                self.copy_selection(cx);
-            }
-            "v" if event.modifiers.command => {
-                self.paste_text(cx);
-            }
-            "/" if event.modifiers.command => {
-                self.toggle_comment(cx);
-            }
-            "]" if event.modifiers.command => {
-                self.indent_code(cx);
-            }
-            "[" if event.modifiers.command => {
-                self.unindent_code(cx);
-            }
-            " " if event.modifiers.control => {
-                self.toggle_ai_panel(cx);
-            }
+    pub fn handle_key_event(&mut self, event: &KeystrokeEvent, cx: &mut Context<'_, Self>) {
+        let key = event.keystroke.key.as_str();
+        let modifiers = &event.keystroke.modifiers;
+        let command = modifiers.platform;
+
+        match key {
+            "s" if command => self.save_current_file(cx),
+            "z" if command => self.undo(cx),
+            "y" if command => self.redo(cx),
+            "f" if command => log::info!("Open find dialog"),
+            "c" if command => self.copy_selection(cx),
+            "v" if command => self.paste_text(cx),
+            "/" if command => self.toggle_comment(cx),
+            "]" if command => self.indent_code(cx),
+            "[" if command => self.unindent_code(cx),
+            " " if modifiers.control => self.toggle_ai_panel(cx),
             _ => {
-                // 处理其他按键
-                if event.modifiers.is_empty() {
-                    match event.key.as_str() {
-                        "Backspace" => {
-                            self.delete_text(cx);
-                        }
-                        "Enter" => {
-                            self.insert_text("\n", cx);
-                        }
-                        "Tab" => {
-                            self.indent_code(cx);
-                        }
-                        _ if event.key.len() == 1 => {
-                            self.insert_text(&event.key, cx);
+                if !modifiers.modified() {
+                    match key {
+                        "Backspace" => self.delete_text(cx),
+                        "Enter" => self.insert_text("\n", cx),
+                        "Tab" => self.indent_code(cx),
+                        _ if event.keystroke.key.len() == 1 => {
+                            self.insert_text(&event.keystroke.key, cx);
                         }
                         _ => {}
                     }

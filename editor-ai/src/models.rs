@@ -1,3 +1,4 @@
+use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
@@ -172,29 +173,25 @@ pub struct ContextMetadata {
 pub struct AIContext {
     // 文件信息
     pub file_info: FileInfo,
-    
+
     // 内容信息
     pub file_content: String,
-    
+
     // 选择信息
     pub selection: Option<SelectionInfo>,
-    
+
     // 光标信息
     pub cursor: CursorInfo,
-    
+
     // 项目上下文
     pub project_context: Option<ProjectContext>,
-    
+
     // 其他元数据
     pub metadata: ContextMetadata,
 }
 
 impl AIContext {
-    pub fn new(
-        file_content: String,
-        file_info: FileInfo,
-        cursor: CursorInfo,
-    ) -> Self {
+    pub fn new(file_content: String, file_info: FileInfo, cursor: CursorInfo) -> Self {
         Self {
             file_info,
             file_content,
@@ -204,7 +201,7 @@ impl AIContext {
             metadata: ContextMetadata {
                 timestamp: std::time::SystemTime::now()
                     .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap()
+                    .unwrap_or_else(|_| std::time::Duration::from_secs(0))
                     .as_secs(),
                 context_size: 0,
                 token_estimate: 0,
@@ -271,7 +268,10 @@ impl AIContext {
                 prompt.push_str(&format!("Root: {}\n", root.display()));
             }
             if !project.dependencies.is_empty() {
-                prompt.push_str(&format!("Dependencies: {}\n", project.dependencies.join(", ")));
+                prompt.push_str(&format!(
+                    "Dependencies: {}\n",
+                    project.dependencies.join(", ")
+                ));
             }
             prompt.push_str("\n");
         }
@@ -297,17 +297,23 @@ impl AIContext {
         // 添加选区信息
         if let Some(selection) = &self.selection {
             prompt.push_str("## Selected Code\n");
-            prompt.push_str(&format!("Position: L{}-C{} to L{}-C{}\n", 
-                selection.start_line, selection.start_column,
-                selection.end_line, selection.end_column));
+            prompt.push_str(&format!(
+                "Position: L{}-C{} to L{}-C{}\n",
+                selection.start_line,
+                selection.start_column,
+                selection.end_line,
+                selection.end_column
+            ));
             prompt.push_str(&format!("```{}\n", self.file_info.language));
             prompt.push_str(&selection.text);
             prompt.push_str("\n```\n\n");
         }
 
         // 添加光标位置
-        prompt.push_str(&format!("## Cursor Position\nLine: {}, Column: {}\n\n", 
-            self.cursor.line, self.cursor.column));
+        prompt.push_str(&format!(
+            "## Cursor Position\nLine: {}, Column: {}\n\n",
+            self.cursor.line, self.cursor.column
+        ));
 
         prompt.push_str("You are an expert programming assistant. Provide helpful, accurate, and concise responses based on the code context provided.");
 
@@ -321,14 +327,18 @@ impl AIContext {
         buffer: &editor_core_text::Buffer,
         file_path: Option<PathBuf>,
         language: String,
-    ) -> anyhow::Result<Self> {
+    ) -> Result<Self> {
         let file_content = buffer.get_text().await;
         let line_count = buffer.line_count().await;
-        
+
         let file_info = FileInfo {
             path: file_path.clone(),
-            name: file_path.as_ref().and_then(|p| p.file_name().map(|n| n.to_string_lossy().to_string())),
-            extension: file_path.as_ref().and_then(|p| p.extension().map(|e| e.to_string_lossy().to_string())),
+            name: file_path
+                .as_ref()
+                .and_then(|p| p.file_name().map(|n| n.to_string_lossy().to_string())),
+            extension: file_path
+                .as_ref()
+                .and_then(|p| p.extension().map(|e| e.to_string_lossy().to_string())),
             language,
             line_count,
         };
@@ -337,7 +347,7 @@ impl AIContext {
         let selection_info = Self::get_selection_info(buffer).await?;
 
         let mut context = Self::new(file_content, file_info, cursor_info);
-        
+
         if let Some(selection) = selection_info {
             context = context.with_selection(selection);
         }
@@ -349,12 +359,12 @@ impl AIContext {
         Ok(context)
     }
 
-    async fn get_cursor_info(buffer: &editor_core_text::Buffer) -> anyhow::Result<CursorInfo> {
+    async fn get_cursor_info(buffer: &editor_core_text::Buffer) -> Result<CursorInfo> {
         let cursors = buffer.get_cursors();
         if let Some(cursor) = cursors.first() {
             // 计算字符位置（需要根据实际 Buffer 实现调整）
-            let position_in_file = buffer.text_model.line_to_char(cursor.line).await + cursor.column;
-            
+            let position_in_file = buffer.cursor_char_index(*cursor).await;
+
             Ok(CursorInfo {
                 line: cursor.line,
                 column: cursor.column,
@@ -369,7 +379,9 @@ impl AIContext {
         }
     }
 
-    async fn get_selection_info(buffer: &editor_core_text::Buffer) -> anyhow::Result<Option<SelectionInfo>> {
+    async fn get_selection_info(
+        buffer: &editor_core_text::Buffer,
+    ) -> Result<Option<SelectionInfo>> {
         let selections = buffer.get_selections();
         if selections.is_empty() {
             return Ok(None);
@@ -381,7 +393,7 @@ impl AIContext {
         }
 
         let text = Self::extract_selection_text(buffer, selection).await?;
-        
+
         Ok(Some(SelectionInfo {
             text,
             start_line: selection.start().line,
@@ -395,7 +407,7 @@ impl AIContext {
     async fn extract_selection_text(
         buffer: &editor_core_text::Buffer,
         selection: &editor_core_text::Selection,
-    ) -> anyhow::Result<String> {
+    ) -> Result<String> {
         // 实现选区文本提取逻辑
         // 这里需要根据实际的 Buffer API 来实现
         Ok("extracted_selection_text".to_string()) // 占位符

@@ -209,6 +209,26 @@ pub enum WorkflowTrigger {
     Timer { interval_seconds: u64 },
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LSPConfig {
+    pub enabled: bool,
+    pub servers: Vec<LSPServerConfig>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LSPServerConfig {
+    pub language: String,
+    pub command: String,
+    pub args: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UIConfig {
+    pub theme: String,
+    pub show_line_numbers: bool,
+    pub show_minimap: bool,
+}
+
 // 运行时模型信息
 #[derive(Debug, Clone)]
 pub struct DiscoveredModel {
@@ -259,7 +279,7 @@ impl Default for Config {
 
         // 创建预定义的模型配置，包括 GPT-5
         let mut predefined_models = HashMap::new();
-        
+
         // GPT-5 模型配置
         predefined_models.insert(
             "gpt-5".to_string(),
@@ -267,7 +287,9 @@ impl Default for Config {
                 provider: "openai".to_string(),
                 model_name: "gpt-5".to_string(),
                 display_name: "GPT-5".to_string(),
-                description: "OpenAI's next-generation model with enhanced capabilities and larger context".to_string(),
+                description:
+                    "OpenAI's next-generation model with enhanced capabilities and larger context"
+                        .to_string(),
                 context_size: 128000,
                 max_tokens: Some(16384),
                 temperature: Some(0.7),
@@ -286,11 +308,16 @@ impl Default for Config {
                     max_input_tokens: Some(128000),
                     max_output_tokens: Some(16384),
                 },
-                tags: vec!["general".to_string(), "chat".to_string(), "vision".to_string(), "latest".to_string()],
+                tags: vec![
+                    "general".to_string(),
+                    "chat".to_string(),
+                    "vision".to_string(),
+                    "latest".to_string(),
+                ],
                 cost_per_1k_tokens: Some(0.05),
             },
         );
-        
+
         predefined_models.insert(
             "gpt-4".to_string(),
             PredefinedModelConfig {
@@ -320,7 +347,7 @@ impl Default for Config {
                 cost_per_1k_tokens: Some(0.03),
             },
         );
-        
+
         predefined_models.insert(
             "gpt-3.5-turbo".to_string(),
             PredefinedModelConfig {
@@ -346,7 +373,11 @@ impl Default for Config {
                     max_input_tokens: Some(4096),
                     max_output_tokens: Some(2048),
                 },
-                tags: vec!["general".to_string(), "chat".to_string(), "fast".to_string()],
+                tags: vec![
+                    "general".to_string(),
+                    "chat".to_string(),
+                    "fast".to_string(),
+                ],
                 cost_per_1k_tokens: Some(0.002),
             },
         );
@@ -472,9 +503,7 @@ impl Config {
 
     // 获取启用的 provider 列表
     pub fn get_enabled_providers(&self) -> Vec<&AIProviderConfig> {
-        self.ai.providers.values()
-            .filter(|p| p.enabled)
-            .collect()
+        self.ai.providers.values().filter(|p| p.enabled).collect()
     }
 
     // 获取预定义的模型配置
@@ -489,15 +518,11 @@ impl Config {
 
     // 获取启用的 agent
     pub fn get_enabled_agents(&self) -> Vec<&AgentConfig> {
-        self.ai.agents.values()
-            .filter(|a| a.enabled)
-            .collect()
+        self.ai.agents.values().filter(|a| a.enabled).collect()
     }
 
     // 获取启用的 workflow
     pub fn get_enabled_workflows(&self) -> Vec<&WorkflowConfig> {
-        self.ai.workflows.values()
-            .filter(|w| w.enabled)
-            .collect()
+        self.ai.workflows.values().filter(|w| w.enabled).collect()
     }
 }
