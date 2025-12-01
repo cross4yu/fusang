@@ -1,6 +1,6 @@
 use editor_ai::models::{AIContext, AIMessage, AIRole};
 use editor_core_text::Buffer;
-use gpui::{div, Context, IntoElement, ParentElement, Render, Window};
+use gpui::{div, px, rgb, Context, Window, prelude::*};
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -176,8 +176,95 @@ impl AIPanel {
 
 impl Render for AIPanel {
     fn render(&mut self, _window: &mut Window, _cx: &mut Context<'_, Self>) -> impl IntoElement {
-        // Basic placeholder UI
-        div().child("AI Panel")
+        let mut layout = div()
+            .flex()
+            .flex_col()
+            .gap_2()
+            .p_3()
+            .text_sm()
+            .bg(rgb(0x0b1627))
+            .text_color(rgb(0xd9e8ff));
+
+        layout = layout.child(
+            div()
+                .flex()
+                .items_center()
+                .justify_between()
+                .child(div().text_color(rgb(0x8fd8ff)).child("AI Copilot"))
+                .child(
+                    div()
+                        .px_2()
+                        .py_1()
+                        .rounded(px(6.0))
+                        .bg(rgb(0x132c4d))
+                        .text_xs()
+                        .child(if self.is_loading {
+                            "思考中…"
+                        } else {
+                            "空闲"
+                        }),
+                ),
+        );
+
+        if let Some(summary) = self.context_summary() {
+            layout = layout.child(
+                div()
+                    .rounded(px(8.0))
+                    .bg(rgb(0x132d4b))
+                    .p_2()
+                    .text_color(rgb(0xa6c8ff))
+                    .child(format!("上下文: {}", summary)),
+            );
+        }
+
+        let mut messages = div()
+            .id("ai-messages")
+            .flex()
+            .flex_col()
+            .gap_2()
+            .p_2()
+            .rounded(px(8.0))
+            .bg(rgb(0x0f2038))
+            .border_1()
+            .border_color(rgb(0x1a2d4a))
+            .overflow_y_scroll();
+
+        if self.messages.is_empty() {
+            messages = messages.child(
+                div()
+                    .text_color(rgb(0x7ea6d6))
+                    .child("暂无对话。使用 Ctrl+Space 打开面板后，可让它解释或改进当前文件。"),
+            );
+        } else {
+            for message in &self.messages {
+                let role_color = match message.role {
+                    AIRole::User => rgb(0xb3f7a4),
+                    AIRole::Assistant => rgb(0x9ecbff),
+                    AIRole::System => rgb(0xffe4a6),
+                };
+
+                messages = messages.child(
+                    div()
+                        .rounded(px(6.0))
+                        .bg(rgb(0x12223a))
+                        .p_2()
+                        .child(
+                            div()
+                                .text_xs()
+                                .text_color(role_color)
+                                .child(format!("{:?}", message.role)),
+                        )
+                        .child(
+                            div()
+                                .mt_1()
+                                .text_color(rgb(0xd9e8ff))
+                                .child(message.content.clone()),
+                        ),
+                );
+            }
+        }
+
+        layout.child(messages)
     }
 }
 
