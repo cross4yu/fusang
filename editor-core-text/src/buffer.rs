@@ -678,6 +678,27 @@ impl Buffer {
             .map(|line| line.chars().count())
     }
 
+    /// Replace a character range in the buffer with new text, returns new cursor index in chars.
+    pub async fn replace_range(
+        &mut self,
+        start_char_idx: usize,
+        len: usize,
+        new_text: &str,
+    ) -> usize {
+        self.text_model.replace(start_char_idx, len, new_text).await;
+        self.is_dirty = true;
+        // Return start + inserted length as a best-effort caret position.
+        start_char_idx + new_text.chars().count()
+    }
+
+    /// Overwrite the entire buffer content
+    pub async fn set_text(&mut self, text: &str) {
+        self.text_model.set_text(text).await;
+        self.cursors = vec![Cursor::zero()];
+        self.selections = vec![Selection::single(Cursor::zero())];
+        self.is_dirty = true;
+    }
+
     pub async fn undo(&mut self) -> bool {
         if let Some(record) = self.undo_stack.pop() {
             self.undo_stack_cost = self.undo_stack_cost.saturating_sub(record.cost());

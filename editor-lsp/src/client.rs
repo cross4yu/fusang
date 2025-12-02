@@ -1,7 +1,7 @@
 use super::protocol::{CompletionItem, Hover, LspMessage, LspMethod, Position};
 use serde_json::Value;
 use std::collections::HashMap;
-use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
+use std::process::{Child, Command, Stdio};
 use std::sync::Arc;
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{ChildStdin as AsyncChildStdin, ChildStdout as AsyncChildStdout};

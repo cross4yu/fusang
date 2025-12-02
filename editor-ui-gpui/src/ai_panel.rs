@@ -1,6 +1,6 @@
 use editor_ai::models::{AIContext, AIMessage, AIRole};
 use editor_core_text::Buffer;
-use gpui::{div, px, rgb, Context, Window, prelude::*};
+use gpui::{div, prelude::*, px, rgb, Context, Window};
 use std::path::PathBuf;
 use std::sync::Arc;
 

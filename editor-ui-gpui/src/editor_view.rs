@@ -3,8 +3,9 @@ use editor_core_project::BufferManager;
 use editor_core_text::CursorMovement;
 use editor_infra::config::Config;
 use gpui::{
-    div, px, rgb, AppContext, AsyncApp, Context, Entity, InteractiveElement, KeystrokeEvent,
-    StatefulInteractiveElement, WeakEntity, Window, prelude::*,
+    div, prelude::*, px, rgb, AppContext, AsyncApp, Context, Entity, HighlightStyle,
+    InteractiveElement, KeystrokeEvent, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent,
+    Pixels, Point, StatefulInteractiveElement, StyledText, WeakEntity, Window,
 };
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -20,7 +21,6 @@ pub struct EditorView {
     line_prefix_widths: Vec<Vec<f32>>,
     selection: Option<editor_core_text::Selection>,
     is_dirty: bool,
-    rendered_text: String,
     status_message: String,
     show_ai_panel: bool,
     ai_panel: Option<Entity<AIPanel>>,
@@ -29,8 +29,8 @@ pub struct EditorView {
     quick_open_input: String,
     ai_prompt_input: String,
     ai_input_focused: bool,
-    dragging: bool,
     scroll_handle: gpui::ScrollHandle,
+    dragging_selection: bool,
 }
 
 impl EditorView {
@@ -47,7 +47,6 @@ impl EditorView {
             line_prefix_widths: Vec::new(),
             selection: None,
             is_dirty: false,
-            rendered_text: String::new(),
             status_message: "Bootstrapping workspace…".to_string(),
             show_ai_panel: false,
             ai_panel: None,
@@ -56,8 +55,8 @@ impl EditorView {
             quick_open_input: String::new(),
             ai_prompt_input: String::new(),
             ai_input_focused: false,
-            dragging: false,
             scroll_handle: gpui::ScrollHandle::new(),
+            dragging_selection: false,
         }
     }
 
@@ -93,12 +92,13 @@ impl EditorView {
                     }
                 }
 
-                let snapshot = if let Some(buffer_handle) = buffer_manager.get_buffer(&target_path).await {
-                    let buffer = buffer_handle.lock().await;
-                    buffer.get_text().await
-                } else {
-                    String::new()
-                };
+                let _snapshot =
+                    if let Some(buffer_handle) = buffer_manager.get_buffer(&target_path).await {
+                        let buffer = buffer_handle.lock().await;
+                        buffer.get_text().await
+                    } else {
+                        String::new()
+                    };
 
                 let open_files = buffer_manager.get_open_files().await;
                 let (lines, selection, is_dirty, widths) =
@@ -108,7 +108,6 @@ impl EditorView {
 
                 let _ = this.update(&mut app, |view, cx| {
                     view.current_file_path = Some(target_path.clone());
-                    view.rendered_text = snapshot;
                     view.open_files = open_files;
                     view.lines = lines;
                     view.line_prefix_widths = widths;
@@ -183,13 +182,6 @@ impl EditorView {
             let mut app = cx.clone();
 
             async move {
-                let text = if let Some(buffer_handle) = buffer_manager.get_current_buffer().await {
-                    let buffer = buffer_handle.lock().await;
-                    buffer.get_text().await
-                } else {
-                    String::new()
-                };
-
                 let open_files = buffer_manager.get_open_files().await;
                 let current_path = buffer_manager.get_current_file_path().await;
                 let (lines, selection, is_dirty, widths) =
@@ -198,7 +190,6 @@ impl EditorView {
                         .unwrap_or_default();
 
                 let _ = this.update(&mut app, |view, cx| {
-                    view.rendered_text = text.clone();
                     view.open_files = open_files.clone();
                     view.current_file_path = current_path.clone();
                     view.line_prefix_widths = widths;
@@ -574,8 +565,10 @@ impl EditorView {
             async move {
                 let path = buffer_manager.create_new_buffer().await;
                 let (lines, selection, is_dirty, widths) =
-                    EditorView::snapshot_buffer(&buffer_manager, tab_size).await.unwrap_or_default();
-                let text = if let Some(handle) = buffer_manager.get_buffer(&path).await {
+                    EditorView::snapshot_buffer(&buffer_manager, tab_size)
+                        .await
+                        .unwrap_or_default();
+                let _text = if let Some(handle) = buffer_manager.get_buffer(&path).await {
                     let buffer = handle.lock().await;
                     buffer.get_text().await
                 } else {
@@ -591,7 +584,6 @@ impl EditorView {
                     view.line_prefix_widths = widths;
                     view.selection = selection;
                     view.is_dirty = is_dirty;
-                    view.rendered_text = text;
                     view.status_message = "新建 untitled 缓冲区".to_string();
                     cx.notify();
                 });
@@ -715,20 +707,21 @@ impl EditorView {
     }
 
     /// 根据方向移动光标
-    fn move_cursor_by(&mut self, movement: CursorMovement, extend: bool, cx: &mut Context<'_, Self>) {
+    fn move_cursor_by(
+        &mut self,
+        movement: CursorMovement,
+        extend: bool,
+        cx: &mut Context<'_, Self>,
+    ) {
         let buffer_manager = self.buffer_manager.clone();
         cx.spawn(move |this: WeakEntity<EditorView>, cx: &mut AsyncApp| {
             let mut app = cx.clone();
             async move {
                 if let Some(handle) = buffer_manager.get_current_buffer().await {
                     let mut buffer = handle.lock().await;
-                    let current = buffer
-                        .get_selections()
-                        .first()
-                        .cloned()
-                        .unwrap_or(editor_core_text::Selection::single(
-                            editor_core_text::Cursor::zero(),
-                        ));
+                    let current = buffer.get_selections().first().cloned().unwrap_or(
+                        editor_core_text::Selection::single(editor_core_text::Cursor::zero()),
+                    );
                     let mut cursor = current.active;
                     let line_count = buffer.line_count().await;
 
@@ -738,7 +731,8 @@ impl EditorView {
                                 cursor.column -= 1;
                             } else if cursor.line > 0 {
                                 cursor.line -= 1;
-                                cursor.column = buffer.get_line_length(cursor.line).await.unwrap_or(0);
+                                cursor.column =
+                                    buffer.get_line_length(cursor.line).await.unwrap_or(0);
                             }
                         }
                         CursorMovement::Right => {
@@ -777,7 +771,10 @@ impl EditorView {
                     }
 
                     if extend {
-                        buffer.set_selection(editor_core_text::Selection::new(current.anchor, cursor));
+                        buffer.set_selection(editor_core_text::Selection::new(
+                            current.anchor,
+                            cursor,
+                        ));
                     } else {
                         buffer.set_cursor(cursor);
                     }
@@ -797,13 +794,11 @@ impl EditorView {
 
     /// 将点击位置转换为列号，基于大致字符宽度
     fn hit_test_column(&self, line_idx: usize, mouse_x: gpui::Pixels) -> usize {
-        let font_px = self.config.editor.font_size as f32;
-        let char_w = (font_px.max(8.0)) * 0.6;
+        let char_w = self.char_width();
         let pos_x: f32 = mouse_x.into();
         let scroll_x: f32 = self.scroll_handle.offset().x.into();
-        let digits = ((self.lines.len().max(1) as f32).log10().floor() as usize) + 1;
-        let gutter = char_w * digits as f32 + 16.0; // line numbers + padding
-        let base_x = gutter + 16.0; // gap before code
+        let gutter = self.gutter_width();
+        let base_x = gutter + self.code_left_padding();
         if pos_x + scroll_x <= base_x {
             return 0;
         }
@@ -845,6 +840,99 @@ impl EditorView {
             self.scroll_handle.scroll_to_item(target);
         }
     }
+
+    fn line_height(&self) -> f32 {
+        (self.config.editor.font_size.max(12.0)) * 1.6
+    }
+
+    fn char_width(&self) -> f32 {
+        (self.config.editor.font_size.max(8.0)) * 0.6
+    }
+
+    fn line_number_digits(&self) -> usize {
+        ((self.lines.len().max(1) as f32).log10().floor() as usize) + 1
+    }
+
+    fn gutter_width(&self) -> f32 {
+        self.char_width() * self.line_number_digits() as f32 + 12.0
+    }
+
+    fn code_left_padding(&self) -> f32 {
+        14.0
+    }
+
+    fn code_area_padding(&self) -> f32 {
+        12.0
+    }
+
+    fn byte_index_for_column(line: &str, column: usize) -> usize {
+        line.char_indices()
+            .nth(column)
+            .map(|(idx, _)| idx)
+            .unwrap_or_else(|| line.len())
+    }
+
+    fn selection_range_for_line(&self, line_idx: usize, line_len: usize) -> Option<(usize, usize)> {
+        let selection = self.selection?;
+        if selection.is_collapsed() {
+            return None;
+        }
+
+        let start = selection.start();
+        let end = selection.end();
+
+        if start.line == end.line && start.line == line_idx {
+            Some((start.column.min(line_len), end.column.min(line_len)))
+        } else if line_idx == start.line {
+            Some((start.column.min(line_len), line_len))
+        } else if line_idx == end.line {
+            Some((0, end.column.min(line_len)))
+        } else if line_idx > start.line && line_idx < end.line {
+            Some((0, line_len))
+        } else {
+            None
+        }
+    }
+
+    #[allow(dead_code)]
+    fn current_cursor(&self) -> Option<editor_core_text::Cursor> {
+        self.selection.map(|sel| sel.active)
+    }
+
+    fn update_cursor_from_point(
+        &mut self,
+        position: Point<Pixels>,
+        extend: bool,
+        cx: &mut Context<'_, Self>,
+    ) {
+        if self.lines.is_empty() || self.quick_open_active {
+            return;
+        }
+
+        let bounds = self.scroll_handle.bounds();
+        let scroll = self.scroll_handle.offset();
+        let mut local_x = f32::from(position.x)
+            - f32::from(bounds.left())
+            - self.code_left_padding()
+            - self.code_area_padding();
+        let mut local_y =
+            f32::from(position.y) - f32::from(bounds.top()) - self.code_area_padding()
+                + f32::from(scroll.y);
+
+        if local_x < 0.0 {
+            local_x = 0.0;
+        }
+        if local_y < 0.0 {
+            local_y = 0.0;
+        }
+
+        let mut line_idx = (local_y / self.line_height()).floor() as usize;
+        line_idx = line_idx.min(self.lines.len().saturating_sub(1));
+
+        let column = self.hit_test_column(line_idx, Pixels::from(local_x));
+        self.set_status("移动光标");
+        self.set_cursor_position(line_idx, column, extend, cx);
+    }
 }
 
 impl Render for EditorView {
@@ -855,16 +943,14 @@ impl Render for EditorView {
         let language = self.current_file_language();
         let ai_panel_open = self.show_ai_panel;
         let cursor = self.selection.map(|sel| sel.active);
+        let gutter_width = self.gutter_width();
+        let line_digits = self.line_number_digits();
 
-        let save_listener = cx.listener(|view: &mut EditorView, _, _, cx| {
-            view.save_current_file(cx)
-        });
-        let toggle_ai_listener = cx.listener(|view: &mut EditorView, _, _, cx| {
-            view.toggle_ai_panel(cx)
-        });
-        let new_file_listener = cx.listener(|view: &mut EditorView, _, _, cx| {
-            view.new_buffer(cx)
-        });
+        let save_listener =
+            cx.listener(|view: &mut EditorView, _, _, cx| view.save_current_file(cx));
+        let toggle_ai_listener =
+            cx.listener(|view: &mut EditorView, _, _, cx| view.toggle_ai_panel(cx));
+        let new_file_listener = cx.listener(|view: &mut EditorView, _, _, cx| view.new_buffer(cx));
         let quick_open_listener = cx.listener(|view: &mut EditorView, _, _, cx| {
             view.quick_open_active = true;
             view.quick_open_input.clear();
@@ -936,8 +1022,16 @@ impl Render for EditorView {
                     .py_2()
                     .text_sm()
                     .rounded(px(6.0))
-                    .bg(if is_active { rgb(0x1f1f1f) } else { rgb(0x161616) })
-                    .text_color(if is_active { rgb(0xffffff) } else { rgb(0xbbbbbb) })
+                    .bg(if is_active {
+                        rgb(0x1f1f1f)
+                    } else {
+                        rgb(0x161616)
+                    })
+                    .text_color(if is_active {
+                        rgb(0xffffff)
+                    } else {
+                        rgb(0xbbbbbb)
+                    })
                     .cursor_pointer()
                     .child(display)
                     .on_click(click_handler),
@@ -1019,10 +1113,18 @@ impl Render for EditorView {
                                 .px_3()
                                 .py_1()
                                 .rounded(px(6.0))
-                                .bg(if ai_panel_open { rgb(0x1a4d8f) } else { rgb(0x3a3a3a) })
+                                .bg(if ai_panel_open {
+                                    rgb(0x1a4d8f)
+                                } else {
+                                    rgb(0x3a3a3a)
+                                })
                                 .active(|btn| btn.opacity(0.85))
                                 .cursor_pointer()
-                                .child(if ai_panel_open { "Hide AI" } else { "AI Copilot" })
+                                .child(if ai_panel_open {
+                                    "Hide AI"
+                                } else {
+                                    "AI Copilot"
+                                })
                                 .on_click(toggle_ai_listener),
                         ),
                 ),
@@ -1068,132 +1170,138 @@ impl Render for EditorView {
                     .p_4()
                     .overflow_scroll()
                     .track_scroll(&self.scroll_handle)
-                    .child({
-                        let mut lines_container = div().flex().flex_col().gap_1();
-                        for (idx, line) in self.lines.iter().enumerate() {
-                            let is_cursor_line = cursor.map(|c| c.line == idx).unwrap_or(false);
-                            let cursor_col = cursor.map(|c| c.column).unwrap_or(0);
-                            let selection = self.selection;
-
-                            let after = {
-                                let chars: Vec<char> = line.chars().collect();
-                                let split_at = std::cmp::min(cursor_col, chars.len());
-                                chars.iter().skip(split_at).collect::<String>()
-                            };
-
-                            let mut row = div()
-                                .flex()
-                                .items_start()
-                                .gap_3()
-                                .w_full()
-                                .bg(if is_cursor_line { rgb(0x181818) } else { rgb(0x111111) })
-                                .px_2()
-                                .py_1()
-                                .rounded(px(4.0))
-                                .id(("line", idx as u64))
-                                .cursor_text()
-                                .on_mouse_down(gpui::MouseButton::Left, cx.listener(
-                                    move |view: &mut EditorView, event: &gpui::MouseDownEvent, _, cx| {
-                                        let col = view.hit_test_column(idx, event.position.x);
-                                        view.dragging = true;
-                                        view.set_cursor_position(idx, col, event.modifiers.shift, cx);
-                                    },
-                                ))
-                                .on_mouse_move(cx.listener(
-                                    move |view: &mut EditorView, event: &gpui::MouseMoveEvent, _, cx| {
-                                        if view.dragging {
-                                            let col = view.hit_test_column(idx, event.position.x);
-                                            view.set_cursor_position(idx, col, true, cx);
-                                            view.autoscroll_on_drag(event.position.y);
-                                        }
-                                    },
-                                ))
-                                .on_mouse_up(gpui::MouseButton::Left, cx.listener(
-                                    move |view: &mut EditorView, event: &gpui::MouseUpEvent, _, cx| {
-                                        if view.dragging {
-                                            view.dragging = false;
-                                            let col = view.hit_test_column(idx, event.position.x);
-                                            view.set_cursor_position(idx, col, event.modifiers.shift, cx);
-                                        }
-                                    },
-                                ));
-
-                            row = row.child(
-                                div()
-                                    .w(px(48.0))
-                                    .text_color(rgb(0x555555))
-                                    .text_right()
-                                    .child(format!("{:>4}", idx + 1)),
-                            );
-
-                            let mut line_content =
-                                div().flex().gap_0().text_color(rgb(0xffffff));
-
-                            // 选区高亮
-                            if let Some(sel) = selection {
-                                let start = sel.start();
-                                let end = sel.end();
-                                if idx >= start.line && idx <= end.line {
-                                    let line_chars: Vec<char> = line.chars().collect();
-                                    let len = line_chars.len();
-                                    let range_start = if idx == start.line {
-                                        start.column
-                                    } else {
-                                        0
-                                    };
-                                    let range_end = if idx == end.line {
-                                        end.column.min(len)
-                                    } else {
-                                        len
-                                    };
-
-                                    if range_start < range_end {
-                                        let before_sel: String =
-                                            line_chars.iter().take(range_start).collect();
-                                        let selected: String = line_chars
-                                            .iter()
-                                            .skip(range_start)
-                                            .take(range_end - range_start)
-                                            .collect();
-                                        let after_sel: String =
-                                            line_chars.iter().skip(range_end).collect();
-
-                                        line_content = line_content
-                                            .child(before_sel)
-                                            .child(
-                                                div()
-                                                    .bg(rgb(0x223355))
-                                                    .text_color(rgb(0xffffff))
-                                                    .rounded(px(2.0))
-                                                    .child(selected),
-                                            )
-                                            .child(after_sel);
-                                    } else {
-                                        line_content = line_content.child(line.clone());
-                                    }
-                                } else {
-                                    line_content = line_content.child(line.clone());
-                                }
-                            } else {
-                                line_content = line_content.child(line.clone());
+                    .on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(
+                            |view: &mut EditorView, event: &MouseDownEvent, window, cx| {
+                                view.dragging_selection = true;
+                                view.update_cursor_from_point(
+                                    event.position,
+                                    event.modifiers.shift,
+                                    cx,
+                                );
+                                window.refresh();
+                            },
+                        ),
+                    )
+                    .on_mouse_move(cx.listener(
+                        |view: &mut EditorView, event: &MouseMoveEvent, _window, cx| {
+                            if view.dragging_selection && event.dragging() {
+                                view.update_cursor_from_point(event.position, true, cx);
+                                view.autoscroll_on_drag(event.position.y);
                             }
+                        },
+                    ))
+                    .on_mouse_up(
+                        MouseButton::Left,
+                        cx.listener(
+                            |view: &mut EditorView, _event: &MouseUpEvent, _window, cx| {
+                                view.dragging_selection = false;
+                                cx.notify();
+                            },
+                        ),
+                    )
+                    .child({
+                        if self.lines.is_empty() {
+                            div()
+                                .text_color(rgb(0x666666))
+                                .child("空缓冲区，开始输入试试…")
+                        } else {
+                            let mut code_lines = div().flex().flex_col().gap_0();
 
-                            // 光标
-                            if is_cursor_line {
-                                line_content = line_content
-                                    .child(
+                            for (idx, line) in self.lines.iter().enumerate() {
+                                let is_active_line = cursor.map(|c| c.line == idx).unwrap_or(false);
+                                let line_len = line.chars().count();
+                                let selection_range = self.selection_range_for_line(idx, line_len);
+                                let caret_col = cursor.filter(|c| c.line == idx).map(|c| c.column);
+
+                                let mut highlights = Vec::new();
+
+                                if let Some((start_col, end_col)) = selection_range {
+                                    let start = Self::byte_index_for_column(line, start_col);
+                                    let end = Self::byte_index_for_column(line, end_col);
+                                    if end > start {
+                                        let mut style = HighlightStyle::default();
+                                        style.background_color = Some(rgb(0x24334e).into());
+                                        highlights.push((start..end, style));
+                                    }
+                                }
+
+                                let caret_at_eol = caret_col.map_or(false, |col| col >= line_len);
+                                if let Some(col) = caret_col {
+                                    if col < line_len {
+                                        let start = Self::byte_index_for_column(line, col);
+                                        let end = Self::byte_index_for_column(
+                                            line,
+                                            (col + 1).min(line_len),
+                                        );
+                                        if end >= start {
+                                            let mut style = HighlightStyle::default();
+                                            style.background_color = Some(rgb(0x4c8dff).into());
+                                            highlights.push((start..end, style));
+                                        }
+                                    }
+                                }
+
+                                let mut text = StyledText::new(line.clone());
+                                if !highlights.is_empty() {
+                                    text = text.with_highlights(highlights);
+                                }
+
+                                let mut line_row = div()
+                                    .id(("line", idx as u64))
+                                    .flex()
+                                    .items_start()
+                                    .gap_3()
+                                    .px_2()
+                                    .py_1()
+                                    .bg(if is_active_line {
+                                        rgb(0x121820)
+                                    } else {
+                                        rgb(0x111111)
+                                    });
+
+                                line_row = line_row.child(
+                                    div()
+                                        .w(px(gutter_width))
+                                        .text_right()
+                                        .text_color(if is_active_line {
+                                            rgb(0x8ecbff)
+                                        } else {
+                                            rgb(0x5a5a5a)
+                                        })
+                                        .text_sm()
+                                        .child(format!("{:width$}", idx + 1, width = line_digits)),
+                                );
+
+                                let mut code_text = div()
+                                    .flex()
+                                    .items_start()
+                                    .gap_0()
+                                    .whitespace_nowrap()
+                                    .text_color(rgb(0xffffff))
+                                    .child(text);
+
+                                if caret_at_eol {
+                                    code_text = code_text.child(
                                         div()
                                             .w(px(2.0))
-                                            .h(px(18.0))
-                                            .bg(rgb(0x8ef1a2)),
-                                    )
-                                    .child(after);
+                                            .h(px(self.line_height() * 0.9))
+                                            .bg(rgb(0x4c8dff)),
+                                    );
+                                }
+
+                                if line_len == 0 && caret_at_eol {
+                                    code_text =
+                                        code_text.child(div().text_color(rgb(0x333333)).child(" "));
+                                }
+
+                                line_row = line_row.child(code_text);
+                                code_lines = code_lines.child(line_row);
                             }
 
-                            row = row.child(line_content);
-                            lines_container = lines_container.child(row);
+                            code_lines
                         }
-                        lines_container
                     }),
             );
 
@@ -1232,22 +1340,21 @@ impl Render for EditorView {
                                         .border_color(rgb(0x1a2d4a))
                                         .p_2()
                                         .cursor_text()
-                                        .child(
-                                            if self.ai_prompt_input.is_empty() {
-                                                div()
-                                                    .text_color(rgb(0x5f7a9c))
-                                                    .child("输入问题，回车发送，Esc 退出")
-                                            } else {
-                                                div().text_color(rgb(0xd9e8ff)).child(
-                                                    self.ai_prompt_input
-                                                        .clone(),
-                                                )
+                                        .child(if self.ai_prompt_input.is_empty() {
+                                            div()
+                                                .text_color(rgb(0x5f7a9c))
+                                                .child("输入问题，回车发送，Esc 退出")
+                                        } else {
+                                            div()
+                                                .text_color(rgb(0xd9e8ff))
+                                                .child(self.ai_prompt_input.clone())
+                                        })
+                                        .on_click(cx.listener(
+                                            |view: &mut EditorView, _, _, cx| {
+                                                view.ai_input_focused = true;
+                                                cx.notify();
                                             },
-                                        )
-                                        .on_click(cx.listener(|view: &mut EditorView, _, _, cx| {
-                                            view.ai_input_focused = true;
-                                            cx.notify();
-                                        })),
+                                        )),
                                 )
                                 .child(
                                     div()
@@ -1308,7 +1415,11 @@ impl Render for EditorView {
                     .child(self.status_message.clone())
                     .child(format!(
                         "{} • UTC {}",
-                        if self.is_dirty { "● 未保存" } else { "○ 已保存" },
+                        if self.is_dirty {
+                            "● 未保存"
+                        } else {
+                            "○ 已保存"
+                        },
                         SystemTime::now()
                             .duration_since(UNIX_EPOCH)
                             .map(|d| d.as_secs())

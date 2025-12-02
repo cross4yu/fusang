@@ -408,8 +408,30 @@ impl AIContext {
         buffer: &editor_core_text::Buffer,
         selection: &editor_core_text::Selection,
     ) -> Result<String> {
-        // 实现选区文本提取逻辑
-        // 这里需要根据实际的 Buffer API 来实现
-        Ok("extracted_selection_text".to_string()) // 占位符
+        let start = selection.start();
+        let end = selection.end();
+
+        // 获取整个文本文本和对应的字符位置
+        let full_text = buffer.get_text().await;
+        let start_char_idx = buffer.cursor_char_index(start).await;
+        let end_char_idx = buffer.cursor_char_index(end).await;
+        let (start_char_idx, end_char_idx) = if start_char_idx <= end_char_idx {
+            (start_char_idx, end_char_idx)
+        } else {
+            (end_char_idx, start_char_idx)
+        };
+
+        // 将字符索引转换为字节索引
+        let to_byte = |char_idx: usize| -> usize {
+            full_text
+                .char_indices()
+                .nth(char_idx)
+                .map(|(idx, _)| idx)
+                .unwrap_or_else(|| full_text.len())
+        };
+
+        let start_byte = to_byte(start_char_idx);
+        let end_byte = to_byte(end_char_idx);
+        Ok(full_text[start_byte..end_byte].to_string())
     }
 }

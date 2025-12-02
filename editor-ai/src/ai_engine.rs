@@ -28,6 +28,7 @@ pub enum AIEngineError {
 pub struct AIEngine {
     config: Arc<RwLock<AIConfig>>,
     http_client: Client,
+    #[allow(dead_code)]
     model_cache: Arc<RwLock<HashMap<String, PredefinedModelConfig>>>,
 }
 
@@ -142,7 +143,7 @@ impl AIEngine {
     async fn build_user_message(
         &self,
         context: AIContext,
-        model_config: &PredefinedModelConfig,
+        _model_config: &PredefinedModelConfig,
     ) -> String {
         let mut message = String::new();
 
@@ -208,6 +209,7 @@ impl AIEngine {
         message
     }
 
+    #[allow(dead_code)]
     async fn get_system_prompt(&self, language: &str) -> Option<String> {
         match language {
             "rust" => Some("You are an expert Rust programmer. Provide safe, efficient, and idiomatic Rust code.".to_string()),
